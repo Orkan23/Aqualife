@@ -42,7 +42,7 @@ public class TankView extends JPanel implements Observer {
 
 	private void drawBorders(Graphics2D g2d) {
 		g2d.setStroke(new BasicStroke(4f));
-		g2d.drawLine(0, 0, 0, TankModel.HEIGHT);
+		g2d.drawLine(1, 0, 1, TankModel.HEIGHT);
 		g2d.drawLine(TankModel.WIDTH - 1, 0, TankModel.WIDTH - 1, TankModel.HEIGHT);
 	}
 

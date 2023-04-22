@@ -7,6 +7,7 @@ import java.util.concurrent.TimeUnit;
 
 import aqua.blatt1.common.Direction;
 import aqua.blatt1.common.FishModel;
+import aqua.blatt1.common.RecordType;
 import aqua.blatt1.common.msgtypes.NeighborUpdate;
 
 public class TankModel extends Observable implements Iterable<FishModel> {
@@ -24,7 +25,12 @@ public class TankModel extends Observable implements Iterable<FishModel> {
     protected InetSocketAddress rightNeighbor;
 
     protected boolean token;
+    protected boolean snapshotToken;
     protected Timer timer;
+
+    protected RecordType recordMode = RecordType.IDLE;
+
+    protected int snapshotCounter;
 
     public TankModel(ClientCommunicator.ClientForwarder forwarder) {
         this.fishies = Collections.newSetFromMap(new ConcurrentHashMap<FishModel, Boolean>());
@@ -48,9 +54,12 @@ public class TankModel extends Observable implements Iterable<FishModel> {
     }
 
     synchronized void receiveFish(FishModel fish) {
+        if (recordMode != RecordType.IDLE)
+            snapshotCounter++;
         fish.setToStart();
         fishies.add(fish);
     }
+
 
     synchronized void setLeftNeighbor(InetSocketAddress neighbor) {
         this.leftNeighbor = neighbor;
@@ -88,6 +97,25 @@ public class TankModel extends Observable implements Iterable<FishModel> {
 
     public synchronized boolean hasToken() {
         return token;
+    }
+
+
+    public synchronized void initiateSnapshot() {
+        snapshotCounter = fishies.size();
+        recordMode = RecordType.BOTH;
+        snapshotToken = false;
+        forwarder.sendSnaphsotMarker(leftNeighbor);
+        if (!leftNeighbor.equals(rightNeighbor))
+            forwarder.sendSnaphsotMarker(rightNeighbor);
+        forwarder.handSnapshotToken(leftNeighbor, snapshotCounter);
+    }
+
+    public synchronized void receiveSnapshotToken() {
+
+    }
+
+    public synchronized boolean hasSnapshotToken() {
+        return snapshotToken;
     }
 
     private synchronized void updateFishies() {
