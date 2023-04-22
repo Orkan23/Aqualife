@@ -2,10 +2,7 @@ package aqua.blatt1.broker;
 
 import aqua.blatt1.common.Direction;
 import aqua.blatt1.common.Properties;
-import aqua.blatt1.common.msgtypes.DeregisterRequest;
-import aqua.blatt1.common.msgtypes.HandoffRequest;
-import aqua.blatt1.common.msgtypes.RegisterRequest;
-import aqua.blatt1.common.msgtypes.RegisterResponse;
+import aqua.blatt1.common.msgtypes.*;
 import aqua.blatt2.broker.PoisonPill;
 import messaging.Endpoint;
 import messaging.Message;
@@ -49,18 +46,14 @@ public class Broker {
 
             threadPool.execute(() -> {
                 System.out.println(threadPool.toString());
-                if (payload instanceof RegisterRequest)
-                    register(sender);
-                else if (payload instanceof DeregisterRequest)
-                    deregister((DeregisterRequest) payload);
-                else if (payload instanceof HandoffRequest)
-                    handoffFish((HandoffRequest) payload, sender);
+                if (payload instanceof RegisterRequest) register(sender);
+                else if (payload instanceof DeregisterRequest) deregister((DeregisterRequest) payload);
+                else if (payload instanceof HandoffRequest) handoffFish((HandoffRequest) payload, sender);
                 else if (payload instanceof PoisonPill) {
                     System.out.println("Stopped Broker via Poison Pill!");
                     threadPool.shutdown();
                     System.exit(0);
-                } else
-                    System.out.println(payload.toString());
+                } else System.out.println(payload.toString());
             });
 
         }
@@ -68,9 +61,24 @@ public class Broker {
 
     public void register(InetSocketAddress sender) {
         readWriteLock.writeLock().lock();  // if any other thread is reading or writing, wait before start writing
-        String id = "Tank " + idCounter++;
+        String id = "Tank " + idCounter++ + ":" + sender.getPort();
         System.out.printf("Register new client as %s\n", id);
         clientCollection.add(id, sender);
+
+        int currentIndex = clientCollection.indexOf(id);
+
+        InetSocketAddress currentClient = (InetSocketAddress) clientCollection.getClient(currentIndex);
+        InetSocketAddress leftNeighbor = getLeftNeighbor(currentIndex);
+        InetSocketAddress rightNeighbor = getRightNeighbor(currentIndex);
+
+        endpoint.send(currentClient, new NeighborUpdate(leftNeighbor, Direction.LEFT));
+        endpoint.send(currentClient, new NeighborUpdate(rightNeighbor, Direction.RIGHT));
+
+        if (clientCollection.size() > 1) {
+            endpoint.send(leftNeighbor, new NeighborUpdate(sender, Direction.RIGHT));
+            endpoint.send(rightNeighbor, new NeighborUpdate(sender, Direction.LEFT));
+        } else endpoint.send(currentClient, new Token());
+
         endpoint.send(sender, new RegisterResponse(id));
         readWriteLock.writeLock().unlock();
     }
@@ -84,8 +92,23 @@ public class Broker {
             System.out.println("An unregistered client tries to hand off a fish!");
             return;
         }
+
+        InetSocketAddress leftNeighbor = getLeftNeighbor(index);
+        InetSocketAddress rightNeighbor = getRightNeighbor(index);
+
+        endpoint.send(rightNeighbor, new NeighborUpdate(leftNeighbor, Direction.LEFT));
+        endpoint.send(leftNeighbor, new NeighborUpdate(rightNeighbor, Direction.RIGHT));
+
         clientCollection.remove(index);
         readWriteLock.writeLock().unlock();
+    }
+
+    private InetSocketAddress getLeftNeighbor(int index) {
+        return (InetSocketAddress) clientCollection.getClient((index - 1 + clientCollection.size()) % clientCollection.size());
+    }
+
+    private InetSocketAddress getRightNeighbor(int index) {
+        return (InetSocketAddress) clientCollection.getClient((index + 1) % clientCollection.size());
     }
 
     public void handoffFish(HandoffRequest handoffRequest, InetSocketAddress sender) {
@@ -98,8 +121,7 @@ public class Broker {
         }
 
         Direction direction = handoffRequest.getFish().getDirection();
-        InetSocketAddress clientNeighbourAddress = (InetSocketAddress) (direction.equals(Direction.RIGHT) ?
-                clientCollection.getRightNeighorOf(index) : clientCollection.getLeftNeighorOf(index));
+        InetSocketAddress clientNeighbourAddress = (InetSocketAddress) (direction.equals(Direction.RIGHT) ? clientCollection.getRightNeighorOf(index) : clientCollection.getLeftNeighorOf(index));
 
         System.out.printf("Hand off %s to %s\n", handoffRequest.getFish().getId(), handoffRequest.getFish().getDirection());
 

@@ -2,71 +2,100 @@ package aqua.blatt1.client;
 
 import java.net.InetSocketAddress;
 
+import aqua.blatt1.common.Direction;
+import aqua.blatt1.common.msgtypes.*;
 import messaging.Endpoint;
 import messaging.Message;
 import aqua.blatt1.common.FishModel;
 import aqua.blatt1.common.Properties;
-import aqua.blatt1.common.msgtypes.DeregisterRequest;
-import aqua.blatt1.common.msgtypes.HandoffRequest;
-import aqua.blatt1.common.msgtypes.RegisterRequest;
-import aqua.blatt1.common.msgtypes.RegisterResponse;
 
 public class ClientCommunicator {
-	private final Endpoint endpoint;
+    private final Endpoint endpoint;
 
-	public ClientCommunicator() {
-		endpoint = new Endpoint();
-	}
+    public ClientCommunicator() {
+        endpoint = new Endpoint();
+    }
 
-	public class ClientForwarder {
-		private final InetSocketAddress broker;
+    public class ClientForwarder {
+        private final InetSocketAddress broker;
 
-		private ClientForwarder() {
-			this.broker = new InetSocketAddress(Properties.HOST, Properties.PORT);
-		}
+        private ClientForwarder() {
+            this.broker = new InetSocketAddress(Properties.HOST, Properties.PORT);
+        }
 
-		public void register() {
-			endpoint.send(broker, new RegisterRequest());
-		}
+        public void register() {
+            endpoint.send(broker, new RegisterRequest());
+        }
 
-		public void deregister(String id) {
-			endpoint.send(broker, new DeregisterRequest(id));
-		}
+        public void deregister(String id) {
+            endpoint.send(broker, new DeregisterRequest(id));
+        }
 
-		public void handOff(FishModel fish) {
-			endpoint.send(broker, new HandoffRequest(fish));
-		}
-	}
+        /**
+         * method which is used for the communication via broker
+         */
+        public void handOff(FishModel fish) {
+            endpoint.send(broker, new HandoffRequest(fish));
+        }
 
-	public class ClientReceiver extends Thread {
-		private final TankModel tankModel;
+        /**
+         * method which is used for the communication directly to neighbours
+         */
+        public void handOff(FishModel fish, InetSocketAddress neighbor) {
+            endpoint.send(neighbor, new HandoffRequest(fish));
+            System.out.printf("Hand off %s to %s\n", fish.getId(), neighbor.getPort());
+        }
 
-		private ClientReceiver(TankModel tankModel) {
-			this.tankModel = tankModel;
-		}
+        public void handToken(InetSocketAddress neighbor) {
+            endpoint.send(neighbor, new Token());
+        }
+    }
 
-		@Override
-		public void run() {
-			while (!isInterrupted()) {
-				Message msg = endpoint.blockingReceive();
+    public class ClientReceiver extends Thread {
+        private final TankModel tankModel;
 
-				if (msg.getPayload() instanceof RegisterResponse)
-					tankModel.onRegistration(((RegisterResponse) msg.getPayload()).getId());
+        private ClientReceiver(TankModel tankModel) {
+            this.tankModel = tankModel;
+        }
 
-				if (msg.getPayload() instanceof HandoffRequest)
-					tankModel.receiveFish(((HandoffRequest) msg.getPayload()).getFish());
+        @Override
+        public void run() {
+            while (!isInterrupted()) {
+                Message msg = endpoint.blockingReceive();
 
-			}
-			System.out.println("Receiver stopped.");
-		}
-	}
+                if (msg.getPayload() instanceof RegisterResponse) {
+                    System.out.printf("Client port: %s\n", ((RegisterResponse) msg.getPayload()).getId());
+                    tankModel.onRegistration(((RegisterResponse) msg.getPayload()).getId());
+                }
 
-	public ClientForwarder newClientForwarder() {
-		return new ClientForwarder();
-	}
+                if (msg.getPayload() instanceof HandoffRequest) {
+                    tankModel.receiveFish(((HandoffRequest) msg.getPayload()).getFish());
+                }
 
-	public ClientReceiver newClientReceiver(TankModel tankModel) {
-		return new ClientReceiver(tankModel);
-	}
+                if (msg.getPayload() instanceof NeighborUpdate)
+                    if (((NeighborUpdate) msg.getPayload()).getDirection().equals(Direction.LEFT)) {
+                        tankModel.setLeftNeighbor(((NeighborUpdate) msg.getPayload()).getNeighbor());
+
+                        System.out.printf("Neighbour Left: %s\n", ((NeighborUpdate) msg.getPayload()).getNeighbor());
+                    } else if (((NeighborUpdate) msg.getPayload()).getDirection().equals(Direction.RIGHT)) {
+                        tankModel.setRightNeighbor(((NeighborUpdate) msg.getPayload()).getNeighbor());
+                        System.out.printf("Neighbour Right: %s\n", ((NeighborUpdate) msg.getPayload()).getNeighbor());
+                    }
+
+                if(msg.getPayload() instanceof Token)
+                    tankModel.receiveToken();
+
+            }
+            System.out.println("Receiver stopped.");
+        }
+    }
+
+    public ClientForwarder newClientForwarder() {
+        return new ClientForwarder();
+    }
+
+    public ClientReceiver newClientReceiver(TankModel tankModel) {
+        return new ClientReceiver(tankModel);
+    }
 
 }
