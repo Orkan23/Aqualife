@@ -8,7 +8,6 @@ import java.util.concurrent.TimeUnit;
 import aqua.blatt1.common.Direction;
 import aqua.blatt1.common.FishModel;
 import aqua.blatt1.common.RecordType;
-import aqua.blatt1.common.msgtypes.NeighborUpdate;
 
 public class TankModel extends Observable implements Iterable<FishModel> {
 
@@ -26,6 +25,8 @@ public class TankModel extends Observable implements Iterable<FishModel> {
 
     protected boolean token;
     protected boolean snapshotToken;
+    protected boolean globalSnaphsot;
+    protected volatile boolean finishLocalSnaphsot;
     protected Timer timer;
 
     protected RecordType recordMode = RecordType.IDLE;
@@ -44,8 +45,8 @@ public class TankModel extends Observable implements Iterable<FishModel> {
 
     public synchronized void newFish(int x, int y) {
         if (fishies.size() < MAX_FISHIES) {
-            x = x > WIDTH - FishModel.getXSize() - 1 ? WIDTH - FishModel.getXSize() - 1 : x;
-            y = y > HEIGHT - FishModel.getYSize() ? HEIGHT - FishModel.getYSize() : y;
+            x = Math.min(x, WIDTH - FishModel.getXSize() - 1);
+            y = Math.min(y, HEIGHT - FishModel.getYSize());
 
             FishModel fish = new FishModel("fish" + (++fishCounter) + "@" + getId(), x, y, rand.nextBoolean() ? Direction.LEFT : Direction.RIGHT);
 
@@ -55,30 +56,10 @@ public class TankModel extends Observable implements Iterable<FishModel> {
 
     synchronized void receiveFish(FishModel fish) {
         if (recordMode != RecordType.IDLE)
-            snapshotCounter++;
+            System.out.println("capture fish");
+        snapshotCounter++;
         fish.setToStart();
         fishies.add(fish);
-    }
-
-
-    synchronized void setLeftNeighbor(InetSocketAddress neighbor) {
-        this.leftNeighbor = neighbor;
-    }
-
-    synchronized void setRightNeighbor(InetSocketAddress neighbor) {
-        this.rightNeighbor = neighbor;
-    }
-
-    public String getId() {
-        return id;
-    }
-
-    public synchronized int getFishCounter() {
-        return fishCounter;
-    }
-
-    public synchronized Iterator<FishModel> iterator() {
-        return fishies.iterator();
     }
 
     public synchronized void receiveToken() {
@@ -95,23 +76,56 @@ public class TankModel extends Observable implements Iterable<FishModel> {
         }, 2000);
     }
 
-    public synchronized boolean hasToken() {
-        return token;
-    }
-
-
     public synchronized void initiateSnapshot() {
         snapshotCounter = fishies.size();
         recordMode = RecordType.BOTH;
+        globalSnaphsot = false;
         snapshotToken = false;
-        forwarder.sendSnaphsotMarker(leftNeighbor);
-        if (!leftNeighbor.equals(rightNeighbor))
-            forwarder.sendSnaphsotMarker(rightNeighbor);
+        forwarder.sendSnapshotMarker(leftNeighbor);
+        forwarder.sendSnapshotMarker(rightNeighbor);
         forwarder.handSnapshotToken(leftNeighbor, snapshotCounter);
     }
 
-    public synchronized void receiveSnapshotToken() {
+    public synchronized void receiveSnapshotMarker(InetSocketAddress sender) {
+        switch (recordMode) {
+            case IDLE:
+                System.out.println("Received Snapshot Marker in IDLE to RIGHT/LEFT");
+                snapshotCounter = fishies.size();
+                finishLocalSnaphsot = false;
+                forwarder.sendSnapshotMarker(leftNeighbor);
+                forwarder.sendSnapshotMarker(rightNeighbor);
+                recordMode = sender.equals(leftNeighbor) ? RecordType.RIGHT : RecordType.LEFT;
+                break;
+            case RIGHT:
+                System.out.println("Received Snapshot Marker in RIGHT to IDLE");
+                if (sender.equals(rightNeighbor)) recordMode = RecordType.IDLE;
+                finishLocalSnaphsot = true;
+                System.out.println("Finished local Snapshot! Local counter: " + snapshotCounter);
+                break;
+            case LEFT:
+                System.out.println("Received Snapshot Marker in LEFT to IDLE");
+                if (sender.equals(leftNeighbor)) recordMode = RecordType.IDLE;
+                finishLocalSnaphsot = true;
+                System.out.println("Finished local Snapshot! Local counter: " + snapshotCounter);
+                break;
+            case BOTH:
+                System.out.println("Received Snapshot Marker in BOTH to RIGHT/LEFT");
+                recordMode = sender.equals(leftNeighbor) ? RecordType.RIGHT : RecordType.LEFT;
+                finishLocalSnaphsot = false;
+                break;
+        }
+    }
 
+    public synchronized void receiveSnapshotToken(int counter) {
+        snapshotToken = true;
+        while (!finishLocalSnaphsot) Thread.onSpinWait();
+        forwarder.handSnapshotToken(leftNeighbor, counter + snapshotCounter);
+        snapshotToken = false;
+    }
+
+
+    public synchronized boolean hasToken() {
+        return token;
     }
 
     public synchronized boolean hasSnapshotToken() {
@@ -158,6 +172,26 @@ public class TankModel extends Observable implements Iterable<FishModel> {
 
     public synchronized void finish() {
         forwarder.deregister(id);
+    }
+
+    public synchronized void setLeftNeighbor(InetSocketAddress neighbor) {
+        this.leftNeighbor = neighbor;
+    }
+
+    public synchronized void setRightNeighbor(InetSocketAddress neighbor) {
+        this.rightNeighbor = neighbor;
+    }
+
+    public String getId() {
+        return id;
+    }
+
+    public synchronized int getFishCounter() {
+        return fishCounter;
+    }
+
+    public synchronized Iterator<FishModel> iterator() {
+        return fishies.iterator();
     }
 
 

@@ -50,13 +50,14 @@ public class ClientCommunicator {
             endpoint.send(neighbor, new Token());
         }
 
-        public void sendSnaphsotMarker(InetSocketAddress neighbor) {
+        public void sendSnapshotMarker(InetSocketAddress neighbor) {
             endpoint.send(neighbor, new SnapshotMarker());
         }
 
         public void handSnapshotToken(InetSocketAddress neighbor, int count) {
             endpoint.send(neighbor, new SnapshotToken(count));
         }
+
     }
 
     public class ClientReceiver extends Thread {
@@ -94,10 +95,10 @@ public class ClientCommunicator {
                     tankModel.receiveToken();
 
                 if (msg.getPayload() instanceof SnapshotMarker)
-                    ;
+                    tankModel.receiveSnapshotMarker(msg.getSender());
 
                 if (msg.getPayload() instanceof SnapshotToken)
-                    ;
+                    tankModel.receiveSnapshotToken(((SnapshotToken) msg.getPayload()).getCounter());
 
             }
             System.out.println("Receiver stopped.");
